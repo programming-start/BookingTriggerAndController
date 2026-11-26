@@ -217,6 +217,10 @@ trigger BookingTrigger on Booking__c (before insert,before update,after insert, 
         List<Lead> updateRegisteredLeadList = new List<Lead>();
         List<Booking__c> nocApprovedBookings = new List<Booking__c>(); //added by karthik 23-12-25
         Set<Id> bookingIds = new Set<Id>();
+        // Marketing Cloud registration messages starts - 07-10-2026
+        Set<Id> registrationScheduledBookingIds = new Set<Id>();
+        Set<Id> registrationDoneBookingIds = new Set<Id>();
+        // Marketing Cloud registration messages ends
        
         
         for(Booking__c books : trigger.new){
@@ -227,6 +231,14 @@ trigger BookingTrigger on Booking__c (before insert,before update,after insert, 
                 if (oldBooking.Plot__c != null) unitIds.add(oldBooking.Plot__c);
             }
 			// Ends for Land owner TDS starts 20-08-26
+            // Marketing Cloud registration messages starts - 07-10-2026
+            if (books.Registration_Scheduled_Date__c != null && books.Registration_Scheduled_Date__c != oldBooking.Registration_Scheduled_Date__c) {
+                registrationScheduledBookingIds.add(books.Id);
+            }
+            if (books.Registration_Done__c == true && oldBooking.Registration_Done__c == false) {
+                registrationDoneBookingIds.add(books.Id);
+            }
+            // Marketing Cloud registration messages ends
             // Added for Customer Delight starts 16-07-26
             BookingTriggerHandler.handleRegistrationDone(Trigger.new, Trigger.oldMap);
             // Customer Delight ends 
@@ -360,6 +372,23 @@ BookingController.bookingCancellations(leadIds);
             BookingTriggerHandler.afterNocApproved(nocApprovedBookings);
         }
         
+        // Marketing Cloud registration messages starts - 07-10-2026
+        // Limits check: an update running in async context can add only 1 job, so messaging never fails the Booking save
+        if (!registrationScheduledBookingIds.isEmpty() && Limits.getQueueableJobs() < Limits.getLimitQueueableJobs()) {
+            System.enqueueJob(new BookingQueueable(registrationScheduledBookingIds, BookingQueueable.TYPE_REGISTRATION_SCHEDULED));
+        }
+        if (!registrationScheduledBookingIds.isEmpty() && Limits.getQueueableJobs() < Limits.getLimitQueueableJobs()) {
+            System.enqueueJob(new RegistrationAppointmentQueueable(registrationScheduledBookingIds));
+        }
+        if (!registrationDoneBookingIds.isEmpty() && Limits.getQueueableJobs() < Limits.getLimitQueueableJobs()) {
+            System.enqueueJob(new RegistrationDoneEmailQueueable(registrationDoneBookingIds));
+        }
+        // Marketing Cloud registration messages ends
+
+        // Channel Partner registration webhook starts - 25-11-2026
+        CPRegistrationWebhookQueueable.handleRegistrationDate(Trigger.new, Trigger.oldMap);
+        // Channel Partner registration webhook ends
+
         
         
         /* commented by karthik 
